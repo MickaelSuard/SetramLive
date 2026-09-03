@@ -17,6 +17,9 @@ export const BusMarker = memo(function BusMarker({ vehicle, point, selected, onS
     <button
       type="button"
       title={`${getVehicleEmoji(vehicle)} ${routeLabel} · ${formatDirection(vehicle)} · Véhicule ${vehicle.label}`}
+      onPointerDown={(event) => {
+        event.stopPropagation()
+      }}
       onClick={(event) => {
         event.stopPropagation()
         onSelect(vehicle.id)

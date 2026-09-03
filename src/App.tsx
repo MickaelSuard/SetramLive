@@ -26,15 +26,15 @@ function App() {
   )
 
   return (
-    <div className="min-h-screen bg-zinc-950 font-sans text-zinc-100">
-      <div className="flex h-screen min-h-screen flex-col overflow-hidden">
+    <div className="h-dvh min-h-dvh overflow-hidden bg-zinc-950 font-sans text-zinc-100">
+      <div className="flex h-dvh min-h-dvh flex-col overflow-hidden">
         <Header
           vehicleCount={realtimeState.vehicles.length}
           feedTimestamp={realtimeState.feedTimestamp}
           isRefreshing={realtimeState.isRefreshing}
           hasError={Boolean(realtimeState.error)}
         />
-        <main className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[380px_minmax(0,1fr)]">
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden lg:grid lg:grid-cols-[380px_minmax(0,1fr)]">
           <FleetPanel
             network={networkState.data}
             networkStatus={networkState.status}
@@ -66,9 +66,10 @@ function App() {
             showRoutes={showRoutes}
             loading={networkState.status === 'loading' || realtimeState.status === 'loading'}
             onSelectVehicle={setSelectedVehicleId}
+            onClearVehicle={() => setSelectedVehicleId(null)}
           />
         </main>
-        <footer className="flex min-h-9 items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-950 px-4 text-xs text-zinc-500">
+        <footer className="hidden min-h-9 items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-950 px-4 text-xs text-zinc-500 lg:flex">
           <span>Données SETRAM via le Point d'Accès National transport.data.gouv.fr</span>
           <a href={SETRAM_DATASET_URL} target="_blank" rel="noreferrer" className="text-sky-300 hover:text-sky-200">
             Source GTFS / GTFS-RT

@@ -18,13 +18,11 @@ import {
   unprojectPoint,
 } from '../utils/geo'
 import type { Point } from '../utils/geo'
-import { formatAge, formatSpeed } from '../utils/time'
-import { formatDirection, getVehicleEmoji } from '../utils/vehicle'
 import { BusMarker } from './BusMarker'
 import { MapControls } from './MapControls'
-import { RouteBadge } from './RouteBadge'
 import { RouteLayer } from './RouteLayer'
 import { StopMarker } from './StopMarker'
+import { VehicleInfoPanel } from './VehicleInfoPanel'
 
 type TransitMapProps = {
   network?: StaticNetwork
@@ -35,6 +33,7 @@ type TransitMapProps = {
   showRoutes: boolean
   loading: boolean
   onSelectVehicle: (vehicleId: string) => void
+  onClearVehicle: () => void
 }
 
 type MapView = {
@@ -62,6 +61,7 @@ export function TransitMap({
   showRoutes,
   loading,
   onSelectVehicle,
+  onClearVehicle,
 }: TransitMapProps) {
   const [containerRef, size] = useElementSize<HTMLDivElement>()
   const [view, setView] = useState<MapView>({ center: DEFAULT_CENTER, zoom: 13 })
@@ -234,6 +234,10 @@ export function TransitMap({
       return
     }
 
+    if (event.target instanceof Element && event.target.closest('button,a,input,select,textarea')) {
+      return
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId)
     dragRef.current = {
       pointerId: event.pointerId,
@@ -303,7 +307,7 @@ export function TransitMap({
   }
 
   return (
-    <section className="order-1 h-[58svh] shrink-0 bg-zinc-900 lg:order-2 lg:h-auto lg:min-h-0">
+    <section className="order-1 min-h-0 flex-1 bg-zinc-900 lg:order-2 lg:h-auto lg:min-h-0">
       <div
         ref={containerRef}
         onWheel={handleWheel}
@@ -358,7 +362,6 @@ export function TransitMap({
             />
           ))}
 
-          {selectedVehicle ? <VehicleTooltip vehicle={selectedVehicle} point={project(selectedVehicle)} /> : null}
         </div>
 
         <MapControls
@@ -367,7 +370,7 @@ export function TransitMap({
           onRecenter={recenter}
         />
 
-        <div className="absolute bottom-4 left-4 z-40 max-w-[calc(100%-2rem)] rounded-md border border-white/70 bg-white/95 px-3 py-2 text-xs text-zinc-700 shadow-lg">
+        <div className="absolute left-2 top-2 z-40 hidden max-w-[calc(100%-4rem)] rounded-md border border-white/70 bg-white/95 px-2 py-1.5 text-[11px] text-zinc-700 shadow-lg sm:block sm:left-4 sm:top-4 sm:px-3 sm:py-2 sm:text-xs">
           <span className="font-medium">Zoom {view.zoom}</span>
           <span className="mx-2 text-zinc-400">·</span>
           <span>{visibleStops.length} arrêts</span>
@@ -379,10 +382,12 @@ export function TransitMap({
           href="https://www.openstreetmap.org/copyright"
           target="_blank"
           rel="noreferrer"
-          className="absolute bottom-4 right-4 z-40 rounded-md bg-white/95 px-2 py-1 text-xs text-zinc-600 shadow"
+          className="absolute bottom-2 right-2 z-40 rounded-md bg-white/95 px-2 py-1 text-[10px] text-zinc-600 shadow sm:bottom-4 sm:right-4 sm:text-xs"
         >
           © OpenStreetMap
         </a>
+
+        {selectedVehicle ? <VehicleInfoPanel vehicle={selectedVehicle} onClose={onClearVehicle} /> : null}
 
         {loading ? (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950/35 backdrop-blur-sm">
@@ -394,39 +399,5 @@ export function TransitMap({
         ) : null}
       </div>
     </section>
-  )
-}
-
-function VehicleTooltip({ vehicle, point }: { vehicle: Vehicle; point: Point }) {
-  return (
-    <div
-      className="pointer-events-none absolute z-40 w-64 -translate-x-1/2 -translate-y-[calc(100%+2rem)] rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-100 shadow-2xl"
-      style={{ left: point.x, top: point.y }}
-    >
-      <div className="flex items-center gap-3">
-        <span className="text-xl leading-none" aria-hidden="true">
-          {getVehicleEmoji(vehicle)}
-        </span>
-        <RouteBadge route={vehicle.route} fallback={vehicle.routeId ?? 'Bus'} />
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">Véhicule {vehicle.label}</div>
-          <div className="truncate text-xs text-zinc-400">{vehicle.route?.longName ?? 'Ligne non renseignée'}</div>
-        </div>
-      </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-        <div className="rounded-md bg-zinc-900 p-2">
-          <div className="text-zinc-500">Signal</div>
-          <div>{formatAge(vehicle.timestamp)}</div>
-        </div>
-        <div className="rounded-md bg-zinc-900 p-2">
-          <div className="text-zinc-500">Sens</div>
-          <div>{formatDirection(vehicle, true)}</div>
-        </div>
-        <div className="rounded-md bg-zinc-900 p-2">
-          <div className="text-zinc-500">Vitesse</div>
-          <div>{formatSpeed(vehicle.speed)}</div>
-        </div>
-      </div>
-    </div>
   )
 }

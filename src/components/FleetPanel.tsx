@@ -1,4 +1,5 @@
 import { Layers, MapPinned, RefreshCw, RouteIcon, Search } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type { LoadStatus, Route, StaticNetwork, Vehicle } from '../types/transit'
 import { formatAge, formatClock } from '../utils/time'
@@ -71,8 +72,50 @@ export function FleetPanel({
   }, [query, vehicles])
 
   return (
-    <aside className="order-2 flex min-h-0 flex-1 flex-col border-t border-zinc-800 bg-zinc-950 text-zinc-100 lg:order-1 lg:border-r lg:border-t-0">
-      <div className="space-y-4 border-b border-zinc-800 p-4">
+    <aside className="order-2 flex h-[44dvh] min-h-[15rem] max-h-[21rem] shrink-0 flex-col overflow-hidden rounded-t-xl border-t border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl sm:h-[38dvh] lg:order-1 lg:h-auto lg:min-h-0 lg:max-h-none lg:rounded-none lg:border-r lg:border-t-0 lg:shadow-none">
+      <div className="shrink-0 border-b border-zinc-800 p-2.5 lg:hidden">
+        <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-zinc-700" />
+        <div className="flex items-center gap-2">
+          <div className="flex h-9 min-w-[4.5rem] shrink-0 flex-col justify-center rounded-md border border-zinc-800 bg-zinc-900 px-2">
+            <span className="text-[10px] font-medium uppercase text-zinc-500">Live</span>
+            <span className="text-sm font-semibold leading-none text-zinc-100">{filteredVehicles.length}</span>
+          </div>
+
+          <label className="min-w-0 flex-1">
+            <span className="sr-only">Ligne</span>
+            <select
+              value={selectedRouteId ?? 'all'}
+              onChange={(event) => onSelectRoute(event.target.value === 'all' ? null : event.target.value)}
+              className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 text-xs text-zinc-100 outline-none transition focus:border-sky-400"
+            >
+              <option value="all">Toutes les lignes</option>
+              {routes.map((route) => (
+                <option key={route.id} value={route.id}>
+                  {route.shortName} · {route.longName} ({routeCounts.get(route.id) ?? 0})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <MobileLayerButton icon={MapPinned} label="Arrêts" enabled={showStops} onToggle={onToggleStops} />
+          <MobileLayerButton icon={RouteIcon} label="Tracés" enabled={showRoutes} onToggle={onToggleRoutes} />
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-zinc-800 bg-zinc-900">
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin text-sky-300' : 'text-zinc-500'}`} aria-hidden="true" />
+          </span>
+        </div>
+
+        <label className="relative mt-2 hidden sm:block">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Rechercher"
+            className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-900 pl-10 pr-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-sky-400"
+          />
+        </label>
+      </div>
+
+      <div className="hidden shrink-0 space-y-4 border-b border-zinc-800 p-4 lg:block">
         <div className="grid grid-cols-3 gap-2">
           <Metric label="Live" value={allVehicles.length} />
           <Metric label="Lignes" value={routeCounts.size} />
@@ -112,7 +155,7 @@ export function FleetPanel({
       </div>
 
       {selectedVehicle ? (
-        <div className="border-b border-zinc-800 p-4">
+        <div className="hidden shrink-0 border-b border-zinc-800 p-4 lg:block">
           <div className="flex items-start gap-3">
             <span className="text-xl leading-none" aria-hidden="true">
               {getVehicleEmoji(selectedVehicle)}
@@ -146,12 +189,12 @@ export function FleetPanel({
       ) : null}
 
       {(realtimeError || networkError) && (
-        <div className="border-b border-rose-500/20 bg-rose-950/30 px-4 py-3 text-sm text-rose-100">
+        <div className="shrink-0 border-b border-rose-500/20 bg-rose-950/30 px-3 py-2 text-sm text-rose-100 lg:px-4 lg:py-3">
           {realtimeError ?? networkError}
         </div>
       )}
 
-      <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 text-sm text-zinc-400">
+      <div className="hidden shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-3 text-sm text-zinc-400 lg:flex">
         <span>{networkStatus === 'ready' ? 'GTFS statique chargé' : 'Chargement du réseau'}</span>
         <span className="inline-flex items-center gap-2">
           <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin text-sky-300' : ''}`} aria-hidden="true" />
@@ -159,8 +202,8 @@ export function FleetPanel({
         </span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 py-2 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] lg:p-4">
+        <div className="mb-2 hidden items-center justify-between gap-3 lg:flex">
           <h2 className="text-sm font-semibold uppercase text-zinc-500">Véhicules visibles</h2>
           <span className="inline-flex items-center gap-1 rounded-md bg-zinc-900 px-2 py-1 text-xs text-zinc-400">
             <Layers className="h-3.5 w-3.5" aria-hidden="true" />
@@ -186,6 +229,34 @@ export function FleetPanel({
         </div>
       </div>
     </aside>
+  )
+}
+
+function MobileLayerButton({
+  icon: Icon,
+  label,
+  enabled,
+  onToggle,
+}: {
+  icon: LucideIcon
+  label: string
+  enabled: boolean
+  onToggle: () => void
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onToggle}
+      className={`flex h-9 w-9 items-center justify-center rounded-md border transition ${
+        enabled
+          ? 'border-sky-500/70 bg-sky-500/15 text-sky-200'
+          : 'border-zinc-800 bg-zinc-900 text-zinc-500'
+      }`}
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+    </button>
   )
 }
 
