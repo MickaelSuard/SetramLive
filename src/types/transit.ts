@@ -78,6 +78,7 @@ export type StaticNetwork = {
   tripRouteIds: Record<string, string>
   tripShapeIds: Record<string, string>
   tripsById: Record<string, TripInfo>
+  tripStopIdsByTripId: Record<string, string[]>
   servicesById: Record<string, ServiceCalendar>
   stopDeparturesByStopId: Record<string, StopDeparture[]>
   loadedAt: number

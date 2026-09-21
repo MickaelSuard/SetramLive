@@ -5,7 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { DEFAULT_CENTER } from '../constants/endpoints'
 import type { LatLng, StaticNetwork, Vehicle } from '../types/transit'
+import type { JourneyLocation, JourneyPlan } from '../utils/journey'
 import { BusMarker } from './BusMarker'
+import { JourneyLayer, UserLocationMarker } from './JourneyLayer'
+import { JourneyPlanner } from './JourneyPlanner'
 import { MapControls } from './MapControls'
 import { RouteLayer } from './RouteLayer'
 import { StopInfoPanel } from './StopInfoPanel'
@@ -49,6 +52,8 @@ export function TransitMap({
   onClearVehicle,
 }: TransitMapProps) {
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null)
+  const [journeyPlan, setJourneyPlan] = useState<JourneyPlan | null>(null)
+  const [userPosition, setUserPosition] = useState<JourneyLocation | null>(null)
   const renderer = useMemo(() => canvas({ padding: 0.5, tolerance: 8 }), [])
   const selectedVehicle = useMemo(
     () => allVehicles.find((vehicle) => vehicle.id === selectedVehicleId),
@@ -66,14 +71,22 @@ export function TransitMap({
     return [...vehicles, selectedVehicle]
   }, [selectedVehicle, vehicles])
   const displayedShapes = useMemo(() => {
-    if (!network || !showRoutes) {
+    if (!network || !showRoutes || journeyPlan) {
       return []
     }
 
     return selectedRouteId
       ? network.shapes.filter((shape) => shape.routeId === selectedRouteId)
       : network.shapes
-  }, [network, selectedRouteId, showRoutes])
+  }, [journeyPlan, network, selectedRouteId, showRoutes])
+  const journeyVehicles = useMemo(() => {
+    if (!journeyPlan) {
+      return displayedVehicles
+    }
+
+    const tripIds = new Set(journeyPlan.legs.map((leg) => leg.tripId))
+    return displayedVehicles.filter((vehicle) => vehicle.tripId && tripIds.has(vehicle.tripId))
+  }, [displayedVehicles, journeyPlan])
   const handleSelectStop = useCallback(
     (stopId: string) => {
       setSelectedStopId(stopId)
@@ -87,6 +100,17 @@ export function TransitMap({
       onSelectVehicle(vehicleId)
     },
     [onSelectVehicle],
+  )
+  const handlePlanChange = useCallback(
+    (plan: JourneyPlan | null) => {
+      setJourneyPlan(plan)
+
+      if (plan) {
+        setSelectedStopId(null)
+        onClearVehicle()
+      }
+    },
+    [onClearVehicle],
   )
 
   useEffect(() => {
@@ -148,7 +172,19 @@ export function TransitMap({
             selectedRouteId={selectedRouteId}
           />
 
-          {network && showStops ? (
+          {journeyPlan && network ? (
+            <JourneyLayer plan={journeyPlan} network={network} renderer={renderer} />
+          ) : null}
+
+          {userPosition ? (
+            <UserLocationMarker
+              position={userPosition}
+              renderer={renderer}
+              recenter={!journeyPlan}
+            />
+          ) : null}
+
+          {network && showStops && !journeyPlan ? (
             <StopsLayer
               network={network}
               selectedStopId={selectedStopId}
@@ -156,7 +192,7 @@ export function TransitMap({
             />
           ) : null}
 
-          {displayedVehicles.map((vehicle) => (
+          {journeyVehicles.map((vehicle) => (
             <BusMarker
               key={vehicle.id}
               vehicle={vehicle}
@@ -168,7 +204,15 @@ export function TransitMap({
           <LeafletMapControls points={vehicles.length ? vehicles : network?.stationStops ?? []} />
         </MapContainer>
 
-        <div className="pointer-events-none absolute left-2 top-2 z-[1000] flex w-max max-w-[calc(100%-4rem)] items-center gap-2 rounded-md border border-white/70 bg-white/95 px-2 py-1.5 text-[10px] text-zinc-700 shadow-lg sm:left-4 sm:top-4 sm:px-3 sm:text-xs">
+        <JourneyPlanner
+          network={network}
+          plan={journeyPlan}
+          position={userPosition}
+          onPlanChange={handlePlanChange}
+          onPositionChange={setUserPosition}
+        />
+
+        <div className="pointer-events-none absolute left-2 top-14 z-[1000] flex w-max max-w-[calc(100%-4rem)] items-center gap-2 rounded-md border border-white/70 bg-white/95 px-2 py-1.5 text-[10px] text-zinc-700 shadow-lg sm:left-4 sm:top-16 sm:px-3 sm:text-xs">
           <LegendMarker variant="bus" label="Bus" />
           <LegendMarker variant="tram" label="Tram" />
           <LegendMarker variant="mixed" label="Mixte" />

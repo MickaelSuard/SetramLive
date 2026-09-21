@@ -19,6 +19,11 @@ type ShapePoint = LatLng & {
   sequence: number
 }
 
+type TripStopPoint = {
+  stationId: string
+  sequence: number
+}
+
 const REQUIRED_FILES = new Set(['stops.txt', 'routes.txt', 'trips.txt', 'shapes.txt', 'stop_times.txt', 'calendar.txt'])
 const OPTIONAL_FILES = new Set(['calendar_dates.txt'])
 const MAX_POINTS_PER_SHAPE = 120
@@ -67,7 +72,11 @@ export async function loadStaticNetwork(): Promise<StaticNetwork> {
     }
   }
 
-  const stopDeparturesByStopId = parseStopTimes(strFromU8(files['stop_times.txt']), tripsById, stopsById)
+  const { stopDeparturesByStopId, tripStopIdsByTripId } = parseStopTimes(
+    strFromU8(files['stop_times.txt']),
+    tripsById,
+    stopsById,
+  )
   attachStopRouteMetadata(stops, stopDeparturesByStopId, routesById)
 
   return {
@@ -81,6 +90,7 @@ export async function loadStaticNetwork(): Promise<StaticNetwork> {
     tripRouteIds,
     tripShapeIds,
     tripsById,
+    tripStopIdsByTripId,
     servicesById,
     stopDeparturesByStopId,
     loadedAt: Date.now(),
@@ -228,8 +238,12 @@ function parseStopTimes(
   csv: string,
   tripsById: Record<string, TripInfo>,
   stopsById: Record<string, Stop>,
-): Record<string, StopDeparture[]> {
+): {
+  stopDeparturesByStopId: Record<string, StopDeparture[]>
+  tripStopIdsByTripId: Record<string, string[]>
+} {
   const departuresByStopId: Record<string, StopDeparture[]> = {}
+  const tripStops = new Map<string, TripStopPoint[]>()
 
   for (const row of parseCsv(csv)) {
     const tripId = row.trip_id?.trim()
@@ -239,6 +253,7 @@ function parseStopTimes(
     const routeId = trip?.routeId
     const departureSeconds = parseGtfsTime(row.departure_time ?? row.arrival_time)
     const arrivalSeconds = parseGtfsTime(row.arrival_time ?? row.departure_time)
+    const sequence = Number(row.stop_sequence)
 
     if (!tripId || !stopId || !stop || !routeId || departureSeconds === undefined || arrivalSeconds === undefined) {
       continue
@@ -261,13 +276,36 @@ function parseStopTimes(
     if (stop.parentStation && stop.parentStation !== stopId) {
       addStopDeparture(departuresByStopId, stop.parentStation, departure)
     }
+
+    if (Number.isFinite(sequence)) {
+      const points = tripStops.get(tripId) ?? []
+      points.push({
+        stationId: stop.parentStation ?? stop.id,
+        sequence,
+      })
+      tripStops.set(tripId, points)
+    }
   }
 
   for (const departures of Object.values(departuresByStopId)) {
     departures.sort((a, b) => a.departureSeconds - b.departureSeconds || a.routeId.localeCompare(b.routeId, 'fr'))
   }
 
-  return departuresByStopId
+  const tripStopIdsByTripId = Object.fromEntries(
+    Array.from(tripStops, ([tripId, points]) => {
+      const stationIds = points
+        .sort((a, b) => a.sequence - b.sequence)
+        .map((point) => point.stationId)
+        .filter((stationId, index, values) => stationId !== values[index - 1])
+
+      return [tripId, stationIds]
+    }),
+  )
+
+  return {
+    stopDeparturesByStopId: departuresByStopId,
+    tripStopIdsByTripId,
+  }
 }
 
 function addStopDeparture(
