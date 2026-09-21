@@ -1,29 +1,69 @@
-import { memo } from 'react'
+import { divIcon } from 'leaflet'
+import { memo, useMemo } from 'react'
+import { Marker } from 'react-leaflet'
 import type { Stop } from '../types/transit'
-import type { Point } from '../utils/geo'
+import { getStopTransportKind } from '../utils/schedule'
 
 type StopMarkerProps = {
   stop: Stop
-  point: Point
   detailed: boolean
+  selected: boolean
+  onSelect: (stopId: string) => void
 }
 
-export const StopMarker = memo(function StopMarker({ stop, point, detailed }: StopMarkerProps) {
+export const StopMarker = memo(function StopMarker({
+  stop,
+  detailed,
+  selected,
+  onSelect,
+}: StopMarkerProps) {
+  const kind = getStopTransportKind(stop)
+  const label = `${getStopKindLabel(kind)} ${stop.name}`
+  const icon = useMemo(
+    () =>
+      divIcon({
+        className: 'setram-stop-icon',
+        html: `<span class="setram-stop-dot setram-stop-dot--${kind} ${
+          detailed ? 'setram-stop-dot--detailed' : ''
+        } ${selected ? 'setram-stop-dot--selected' : ''}"></span>`,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+      }),
+    [detailed, kind, selected],
+  )
+  const eventHandlers = useMemo(
+    () => ({
+      click: () => onSelect(stop.id),
+    }),
+    [onSelect, stop.id],
+  )
+
   return (
-    <div
-      className="group pointer-events-auto absolute z-20 -translate-x-1/2 -translate-y-1/2"
-      style={{ left: point.x, top: point.y }}
-    >
-      <button
-        type="button"
-        title={stop.name}
-        className={`block rounded-full border border-white bg-zinc-950 shadow-md transition group-hover:scale-125 ${
-          detailed ? 'h-2.5 w-2.5' : 'h-2 w-2'
-        }`}
-      />
-      <span className="pointer-events-none absolute left-1/2 top-3 hidden w-max max-w-44 -translate-x-1/2 rounded-md bg-zinc-950 px-2 py-1 text-xs text-white shadow-lg group-hover:block">
-        {stop.name}
-      </span>
-    </div>
+    <Marker
+      position={[stop.lat, stop.lng]}
+      icon={icon}
+      eventHandlers={eventHandlers}
+      title={label}
+      alt={label}
+      keyboard
+      riseOnHover
+      zIndexOffset={selected ? 500 : 0}
+    />
   )
 })
+
+function getStopKindLabel(kind: ReturnType<typeof getStopTransportKind>) {
+  if (kind === 'tram') {
+    return 'Arrêt tram'
+  }
+
+  if (kind === 'mixed') {
+    return 'Arrêt bus et tram'
+  }
+
+  if (kind === 'bus') {
+    return 'Arrêt bus'
+  }
+
+  return 'Arrêt'
+}

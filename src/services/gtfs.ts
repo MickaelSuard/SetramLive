@@ -1,7 +1,17 @@
 import { strFromU8, unzipSync } from 'fflate'
 import Papa from 'papaparse'
 import { STATIC_GTFS_URL } from '../constants/endpoints'
-import type { Bounds, LatLng, Route, Shape, StaticNetwork, Stop } from '../types/transit'
+import type {
+  Bounds,
+  LatLng,
+  Route,
+  ServiceCalendar,
+  Shape,
+  StaticNetwork,
+  Stop,
+  StopDeparture,
+  TripInfo,
+} from '../types/transit'
 
 type CsvRow = Record<string, string | undefined>
 
@@ -9,7 +19,8 @@ type ShapePoint = LatLng & {
   sequence: number
 }
 
-const REQUIRED_FILES = new Set(['stops.txt', 'routes.txt', 'trips.txt', 'shapes.txt'])
+const REQUIRED_FILES = new Set(['stops.txt', 'routes.txt', 'trips.txt', 'shapes.txt', 'stop_times.txt', 'calendar.txt'])
+const OPTIONAL_FILES = new Set(['calendar_dates.txt'])
 const MAX_POINTS_PER_SHAPE = 120
 
 export async function loadStaticNetwork(): Promise<StaticNetwork> {
@@ -21,7 +32,7 @@ export async function loadStaticNetwork(): Promise<StaticNetwork> {
 
   const archive = new Uint8Array(await response.arrayBuffer())
   const files = unzipSync(archive, {
-    filter: (file) => REQUIRED_FILES.has(file.name),
+    filter: (file) => REQUIRED_FILES.has(file.name) || OPTIONAL_FILES.has(file.name),
   })
 
   for (const fileName of REQUIRED_FILES) {
@@ -32,10 +43,14 @@ export async function loadStaticNetwork(): Promise<StaticNetwork> {
 
   const stops = parseStops(strFromU8(files['stops.txt']))
   const routes = parseRoutes(strFromU8(files['routes.txt']))
-  const { tripRouteIds, tripShapeIds, shapeRouteIds } = parseTrips(strFromU8(files['trips.txt']))
+  const { tripsById, tripRouteIds, tripShapeIds, shapeRouteIds } = parseTrips(strFromU8(files['trips.txt']))
   const shapes = parseShapes(strFromU8(files['shapes.txt']), shapeRouteIds)
   const stopsById = Object.fromEntries(stops.map((stop) => [stop.id, stop]))
   const routesById = Object.fromEntries(routes.map((route) => [route.id, route]))
+  const servicesById = parseServices(
+    strFromU8(files['calendar.txt']),
+    files['calendar_dates.txt'] ? strFromU8(files['calendar_dates.txt']) : undefined,
+  )
   const shapeIdsByRouteId = shapes.reduce<Record<string, string[]>>((acc, shape) => {
     if (!shape.routeId) {
       return acc
@@ -52,6 +67,9 @@ export async function loadStaticNetwork(): Promise<StaticNetwork> {
     }
   }
 
+  const stopDeparturesByStopId = parseStopTimes(strFromU8(files['stop_times.txt']), tripsById, stopsById)
+  attachStopRouteMetadata(stops, stopDeparturesByStopId, routesById)
+
   return {
     stops,
     stationStops: stops.filter((stop) => stop.locationType === '1'),
@@ -62,6 +80,9 @@ export async function loadStaticNetwork(): Promise<StaticNetwork> {
     shapeIdsByRouteId,
     tripRouteIds,
     tripShapeIds,
+    tripsById,
+    servicesById,
+    stopDeparturesByStopId,
     loadedAt: Date.now(),
   }
 }
@@ -89,6 +110,8 @@ function parseStops(csv: string): Stop[] {
       lng: Number(row.stop_lon),
       locationType: row.location_type?.trim() || '0',
       parentStation: row.parent_station?.trim() || undefined,
+      routeIds: [],
+      transportTypes: [],
     }))
     .filter((stop) => stop.id && Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
 }
@@ -109,6 +132,7 @@ function parseRoutes(csv: string): Route[] {
 }
 
 function parseTrips(csv: string) {
+  const tripsById: Record<string, TripInfo> = {}
   const tripRouteIds: Record<string, string> = {}
   const tripShapeIds: Record<string, string> = {}
   const shapeRouteIds = new Map<string, string>()
@@ -116,10 +140,21 @@ function parseTrips(csv: string) {
   for (const row of parseCsv(csv)) {
     const tripId = row.trip_id?.trim()
     const routeId = row.route_id?.trim()
+    const serviceId = row.service_id?.trim()
     const shapeId = row.shape_id?.trim()
+    const directionId = row.direction_id === undefined || row.direction_id === '' ? undefined : Number(row.direction_id)
 
     if (!tripId) {
       continue
+    }
+
+    tripsById[tripId] = {
+      id: tripId,
+      routeId,
+      serviceId,
+      shapeId,
+      headsign: row.trip_headsign?.trim() || undefined,
+      directionId: Number.isFinite(directionId) ? directionId : undefined,
     }
 
     if (routeId) {
@@ -135,7 +170,156 @@ function parseTrips(csv: string) {
     }
   }
 
-  return { tripRouteIds, tripShapeIds, shapeRouteIds }
+  return { tripsById, tripRouteIds, tripShapeIds, shapeRouteIds }
+}
+
+function parseServices(calendarCsv: string, calendarDatesCsv?: string): Record<string, ServiceCalendar> {
+  const services: Record<string, ServiceCalendar> = {}
+
+  for (const row of parseCsv(calendarCsv)) {
+    const id = row.service_id?.trim()
+
+    if (!id) {
+      continue
+    }
+
+    services[id] = {
+      id,
+      weekdays: [
+        row.sunday === '1',
+        row.monday === '1',
+        row.tuesday === '1',
+        row.wednesday === '1',
+        row.thursday === '1',
+        row.friday === '1',
+        row.saturday === '1',
+      ],
+      startDate: row.start_date?.trim() ?? '',
+      endDate: row.end_date?.trim() ?? '',
+      exceptions: {},
+    }
+  }
+
+  if (calendarDatesCsv) {
+    for (const row of parseCsv(calendarDatesCsv)) {
+      const id = row.service_id?.trim()
+      const date = row.date?.trim()
+      const exceptionType = Number(row.exception_type)
+
+      if (!id || !date || (exceptionType !== 1 && exceptionType !== 2)) {
+        continue
+      }
+
+      services[id] = services[id] ?? {
+        id,
+        weekdays: [false, false, false, false, false, false, false],
+        startDate: date,
+        endDate: date,
+        exceptions: {},
+      }
+      services[id].exceptions[date] = exceptionType
+    }
+  }
+
+  return services
+}
+
+function parseStopTimes(
+  csv: string,
+  tripsById: Record<string, TripInfo>,
+  stopsById: Record<string, Stop>,
+): Record<string, StopDeparture[]> {
+  const departuresByStopId: Record<string, StopDeparture[]> = {}
+
+  for (const row of parseCsv(csv)) {
+    const tripId = row.trip_id?.trim()
+    const stopId = row.stop_id?.trim()
+    const trip = tripId ? tripsById[tripId] : undefined
+    const stop = stopId ? stopsById[stopId] : undefined
+    const routeId = trip?.routeId
+    const departureSeconds = parseGtfsTime(row.departure_time ?? row.arrival_time)
+    const arrivalSeconds = parseGtfsTime(row.arrival_time ?? row.departure_time)
+
+    if (!tripId || !stopId || !stop || !routeId || departureSeconds === undefined || arrivalSeconds === undefined) {
+      continue
+    }
+
+    const departure: StopDeparture = {
+      tripId,
+      routeId,
+      serviceId: trip.serviceId,
+      stopId,
+      stopName: stop.parentStationName ?? stop.name,
+      arrivalSeconds,
+      departureSeconds,
+      headsign: row.stop_headsign?.trim() || trip.headsign,
+      directionId: trip.directionId,
+    }
+
+    addStopDeparture(departuresByStopId, stopId, departure)
+
+    if (stop.parentStation && stop.parentStation !== stopId) {
+      addStopDeparture(departuresByStopId, stop.parentStation, departure)
+    }
+  }
+
+  for (const departures of Object.values(departuresByStopId)) {
+    departures.sort((a, b) => a.departureSeconds - b.departureSeconds || a.routeId.localeCompare(b.routeId, 'fr'))
+  }
+
+  return departuresByStopId
+}
+
+function addStopDeparture(
+  departuresByStopId: Record<string, StopDeparture[]>,
+  stopId: string,
+  departure: StopDeparture,
+) {
+  departuresByStopId[stopId] = departuresByStopId[stopId] ?? []
+  departuresByStopId[stopId].push(departure)
+}
+
+function attachStopRouteMetadata(
+  stops: Stop[],
+  departuresByStopId: Record<string, StopDeparture[]>,
+  routesById: Record<string, Route>,
+) {
+  for (const stop of stops) {
+    const routeIds = Array.from(new Set((departuresByStopId[stop.id] ?? []).map((departure) => departure.routeId))).sort(
+      (a, b) => {
+        const routeA = routesById[a]
+        const routeB = routesById[b]
+
+        return (
+          (routeA?.sortOrder ?? Number.MAX_SAFE_INTEGER) - (routeB?.sortOrder ?? Number.MAX_SAFE_INTEGER) ||
+          (routeA?.shortName ?? a).localeCompare(routeB?.shortName ?? b, 'fr', { numeric: true })
+        )
+      },
+    )
+
+    stop.routeIds = routeIds
+    stop.transportTypes = Array.from(
+      new Set(routeIds.map((routeId) => routesById[routeId]?.type ?? 'Transport')),
+    )
+  }
+}
+
+function parseGtfsTime(value: string | undefined) {
+  const match = value?.trim().match(/^(\d{1,2}):(\d{2}):(\d{2})$/)
+
+  if (!match) {
+    return undefined
+  }
+
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  const seconds = Number(match[3])
+
+  if (!Number.isFinite(hours) || minutes > 59 || seconds > 59) {
+    return undefined
+  }
+
+  return hours * 3600 + minutes * 60 + seconds
 }
 
 function parseShapes(csv: string, shapeRouteIds: Map<string, string>): Shape[] {

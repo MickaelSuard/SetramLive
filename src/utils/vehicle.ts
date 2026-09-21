@@ -1,7 +1,9 @@
 import type { Vehicle } from '../types/transit'
 
 export function getVehicleEmoji(vehicle: Pick<Vehicle, 'route' | 'routeId'>) {
-  return vehicle.route?.type === 'Tram' || vehicle.routeId?.startsWith('T') ? '🚋' : '🚌'
+  const isTram = vehicle.route?.type === 'Tram' || (!vehicle.route && vehicle.routeId?.startsWith('T'))
+
+  return isTram ? '\u{1F68B}' : '\u{1F68C}'
 }
 
 export function formatDirection(vehicle: Pick<Vehicle, 'directionId'>, compact = false) {

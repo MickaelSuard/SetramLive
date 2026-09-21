@@ -10,7 +10,7 @@ type HeaderProps = {
 
 export function Header({ vehicleCount, feedTimestamp, isRefreshing, hasError }: HeaderProps) {
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-950 px-3 py-1.5 text-zinc-100 sm:h-auto sm:min-h-16 sm:flex-wrap sm:gap-3 sm:px-4 sm:py-3 lg:px-6">
+    <header className="hidden shrink-0 items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950 px-4 py-3 text-zinc-100 sm:flex sm:min-h-16 sm:flex-wrap lg:px-6">
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-red-600 text-white shadow-lg shadow-red-950/30 sm:h-11 sm:w-11">
           <BusFront className="h-4 w-4 sm:h-6 sm:w-6" aria-hidden="true" />

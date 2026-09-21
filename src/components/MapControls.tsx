@@ -8,7 +8,7 @@ type MapControlsProps = {
 
 export function MapControls({ onZoomIn, onZoomOut, onRecenter }: MapControlsProps) {
   return (
-    <div className="absolute right-2 top-2 z-40 flex flex-col overflow-hidden rounded-md border border-zinc-300 bg-white shadow-xl sm:right-4 sm:top-4">
+    <div className="absolute right-2 top-2 z-[1000] flex flex-col overflow-hidden rounded-md border border-zinc-300 bg-white shadow-xl sm:right-4 sm:top-4">
       <button
         type="button"
         title="Zoomer"

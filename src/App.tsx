@@ -1,10 +1,13 @@
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { FleetPanel } from './components/FleetPanel'
 import { Header } from './components/Header'
-import { TransitMap } from './components/TransitMap'
 import { SETRAM_DATASET_URL } from './constants/endpoints'
 import { useRealtimeVehicles } from './hooks/useRealtimeVehicles'
 import { useStaticNetwork } from './hooks/useStaticNetwork'
+
+const TransitMap = lazy(() =>
+  import('./components/TransitMap').then((module) => ({ default: module.TransitMap })),
+)
 
 function App() {
   const networkState = useStaticNetwork()
@@ -57,17 +60,26 @@ function App() {
             onToggleStops={() => setShowStops((current) => !current)}
             onToggleRoutes={() => setShowRoutes((current) => !current)}
           />
-          <TransitMap
-            network={networkState.data}
-            vehicles={vehicles}
-            selectedVehicleId={selectedVehicleId}
-            selectedRouteId={selectedRouteId}
-            showStops={showStops}
-            showRoutes={showRoutes}
-            loading={networkState.status === 'loading' || realtimeState.status === 'loading'}
-            onSelectVehicle={setSelectedVehicleId}
-            onClearVehicle={() => setSelectedVehicleId(null)}
-          />
+          <Suspense
+            fallback={
+              <section className="order-1 flex min-h-0 flex-1 items-center justify-center bg-zinc-900 text-sm text-zinc-400 lg:order-2">
+                Chargement de la carte
+              </section>
+            }
+          >
+            <TransitMap
+              network={networkState.data}
+              vehicles={vehicles}
+              allVehicles={realtimeState.vehicles}
+              selectedVehicleId={selectedVehicleId}
+              selectedRouteId={selectedRouteId}
+              showStops={showStops}
+              showRoutes={showRoutes}
+              loading={networkState.status === 'loading' || realtimeState.status === 'loading'}
+              onSelectVehicle={setSelectedVehicleId}
+              onClearVehicle={() => setSelectedVehicleId(null)}
+            />
+          </Suspense>
         </main>
         <footer className="hidden min-h-9 items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-950 px-4 text-xs text-zinc-500 lg:flex">
           <span>Données SETRAM via le Point d'Accès National transport.data.gouv.fr</span>

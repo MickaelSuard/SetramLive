@@ -1,32 +1,21 @@
+import { canvas, divIcon, latLngBounds } from 'leaflet'
+import type { LatLngBounds, Map as LeafletMap } from 'leaflet'
 import { LoaderCircle } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { DEFAULT_CENTER } from '../constants/endpoints'
-import { useElementSize } from '../hooks/useElementSize'
-import type { LatLng, StaticNetwork, Vehicle } from '../types/transit'
-import {
-  TILE_SIZE,
-  boundsIntersect,
-  clampZoom,
-  createProjector,
-  fitViewToPoints,
-  getMapBounds,
-  getTopLeftWorld,
-  getVisibleTiles,
-  isPointInBounds,
-  isPointOnScreen,
-  projectLatLng,
-  unprojectPoint,
-} from '../utils/geo'
-import type { Point } from '../utils/geo'
+import type { LatLng, StaticNetwork, Stop, Vehicle } from '../types/transit'
 import { BusMarker } from './BusMarker'
 import { MapControls } from './MapControls'
 import { RouteLayer } from './RouteLayer'
+import { StopInfoPanel } from './StopInfoPanel'
 import { StopMarker } from './StopMarker'
 import { VehicleInfoPanel } from './VehicleInfoPanel'
 
 type TransitMapProps = {
   network?: StaticNetwork
   vehicles: Vehicle[]
+  allVehicles: Vehicle[]
   selectedVehicleId: string | null
   selectedRouteId: string | null
   showStops: boolean
@@ -36,25 +25,32 @@ type TransitMapProps = {
   onClearVehicle: () => void
 }
 
-type MapView = {
-  center: LatLng
+type Viewport = {
+  bounds: LatLngBounds
   zoom: number
 }
 
-type DragState = {
-  pointerId: number
-  startX: number
-  startY: number
-  startZoom: number
-  startCenterWorld: Point
-  deltaX: number
-  deltaY: number
-  animationFrame?: number
-}
+type StopMapItem =
+  | {
+      type: 'stop'
+      stop: Stop
+    }
+  | {
+      type: 'cluster'
+      id: string
+      lat: number
+      lng: number
+      stops: Stop[]
+    }
+
+const STOP_DETAIL_ZOOM = 16
+const STOP_CLUSTER_ZOOM = 14
+const MAX_VISIBLE_STOPS = 450
 
 export function TransitMap({
   network,
   vehicles,
+  allVehicles,
   selectedVehicleId,
   selectedRouteId,
   showStops,
@@ -63,334 +59,145 @@ export function TransitMap({
   onSelectVehicle,
   onClearVehicle,
 }: TransitMapProps) {
-  const [containerRef, size] = useElementSize<HTMLDivElement>()
-  const [view, setView] = useState<MapView>({ center: DEFAULT_CENTER, zoom: 13 })
-  const [isDragging, setIsDragging] = useState(false)
-  const mapPaneRef = useRef<HTMLDivElement | null>(null)
-  const dragRef = useRef<DragState | null>(null)
-  const hasAutoFit = useRef(false)
-  const routeFitKey = useRef('')
-  const vehicleFitKey = useRef('')
-  const tiles = useMemo(() => getVisibleTiles(view.center, view.zoom, size), [size, view.center, view.zoom])
-  const project = useMemo(() => createProjector(view.center, view.zoom, size), [size, view.center, view.zoom])
-  const bounds = useMemo(() => getMapBounds(view.center, view.zoom, size, 96), [size, view.center, view.zoom])
+  const [selectedStopId, setSelectedStopId] = useState<string | null>(null)
+  const renderer = useMemo(() => canvas({ padding: 0.5, tolerance: 8 }), [])
   const selectedVehicle = useMemo(
-    () => vehicles.find((vehicle) => vehicle.id === selectedVehicleId),
-    [selectedVehicleId, vehicles],
+    () => allVehicles.find((vehicle) => vehicle.id === selectedVehicleId),
+    [allVehicles, selectedVehicleId],
   )
-  const visibleVehiclePoints = useMemo(
-    () =>
-      vehicles
-        .map((vehicle) => ({ vehicle, point: project(vehicle) }))
-        .filter(({ point }) => isPointOnScreen(point, size, 110)),
-    [project, size, vehicles],
+  const selectedStop = useMemo(
+    () => (selectedStopId && network ? network.stopsById[selectedStopId] : undefined),
+    [network, selectedStopId],
   )
-  const visibleStops = useMemo(() => {
-    if (!network || !showStops) {
-      return []
+  const displayedVehicles = useMemo(() => {
+    if (!selectedVehicle || vehicles.some((vehicle) => vehicle.id === selectedVehicle.id)) {
+      return vehicles
     }
 
-    const stops = view.zoom >= 16 ? network.stops : network.stationStops
-    const limit = view.zoom >= 16 ? 700 : view.zoom >= 14 ? 320 : 180
-
-    return stops
-      .filter((stop) => isPointInBounds(stop, bounds))
-      .slice(0, limit)
-      .map((stop) => ({ stop, point: project(stop) }))
-  }, [bounds, network, project, showStops, view.zoom])
-  const visibleShapes = useMemo(() => {
+    return [...vehicles, selectedVehicle]
+  }, [selectedVehicle, vehicles])
+  const displayedShapes = useMemo(() => {
     if (!network || !showRoutes) {
       return []
     }
 
-    return network.shapes.filter((shape) => {
-      if (selectedRouteId && shape.routeId !== selectedRouteId) {
-        return false
-      }
-
-      return shape.bounds
-        ? boundsIntersect(shape.bounds, bounds)
-        : shape.points.some((point) => isPointInBounds(point, bounds))
-    })
-  }, [bounds, network, selectedRouteId, showRoutes])
+    return selectedRouteId
+      ? network.shapes.filter((shape) => shape.routeId === selectedRouteId)
+      : network.shapes
+  }, [network, selectedRouteId, showRoutes])
+  const handleSelectStop = useCallback(
+    (stopId: string) => {
+      setSelectedStopId(stopId)
+      onClearVehicle()
+    },
+    [onClearVehicle],
+  )
+  const handleSelectVehicle = useCallback(
+    (vehicleId: string) => {
+      setSelectedStopId(null)
+      onSelectVehicle(vehicleId)
+    },
+    [onSelectVehicle],
+  )
 
   useEffect(() => {
-    if (dragRef.current || hasAutoFit.current || !vehicles.length || size.width <= 0 || size.height <= 0) {
-      return
-    }
-
-    const nextView = fitViewToPoints(vehicles, size, 120)
-
-    if (nextView) {
+    if (selectedVehicleId) {
       // oxlint-disable-next-line react/set-state-in-effect
-      setView(nextView)
-      hasAutoFit.current = true
+      setSelectedStopId(null)
     }
-  }, [size, vehicles])
+  }, [selectedVehicleId])
 
   useEffect(() => {
-    if (!selectedVehicleId) {
-      vehicleFitKey.current = ''
-      return
-    }
-
-    if (dragRef.current || !selectedVehicle || size.width <= 0 || size.height <= 0) {
-      return
-    }
-
-    const focusKey = `${selectedVehicle.id}-${size.width}-${size.height}`
-
-    if (focusKey === vehicleFitKey.current) {
-      return
-    }
-
-    vehicleFitKey.current = focusKey
-    // oxlint-disable-next-line react/set-state-in-effect
-    setView((current) => ({
-      ...current,
-      center: selectedVehicle,
-    }))
-  }, [selectedVehicle, selectedVehicleId, size.height, size.width])
-
-  useEffect(() => {
-    if (!selectedRouteId) {
-      routeFitKey.current = ''
-      return
-    }
-
-    if (dragRef.current || size.width <= 0 || size.height <= 0) {
-      return
-    }
-
-    const focusKey = `${selectedRouteId}-${size.width}-${size.height}-${network?.loadedAt ?? 0}`
-
-    if (focusKey === routeFitKey.current) {
-      return
-    }
-
-    const routePoints = network?.shapes
-      .filter((shape) => shape.routeId === selectedRouteId)
-      .flatMap((shape) => shape.points)
-    const points = vehicles.length ? vehicles : routePoints ?? []
-    const nextView = fitViewToPoints(points, size, 120)
-
-    if (nextView) {
-      routeFitKey.current = focusKey
+    if (!showStops) {
       // oxlint-disable-next-line react/set-state-in-effect
-      setView(nextView)
+      setSelectedStopId(null)
     }
-  }, [network, selectedRouteId, size, vehicles])
-
-  const zoomAtCenter = (zoom: number) => {
-    setView((current) => ({
-      ...current,
-      zoom: clampZoom(zoom),
-    }))
-  }
-
-  const recenter = () => {
-    const points = vehicles.length ? vehicles : network?.stationStops ?? []
-    const nextView = fitViewToPoints(points, size, 120)
-
-    if (nextView) {
-      setView(nextView)
-    }
-  }
-
-  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    event.preventDefault()
-
-    const nextZoom = clampZoom(view.zoom + (event.deltaY < 0 ? 1 : -1))
-
-    if (nextZoom === view.zoom || size.width <= 0 || size.height <= 0) {
-      return
-    }
-
-    const rect = event.currentTarget.getBoundingClientRect()
-    const cursor = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    }
-    const topLeft = getTopLeftWorld(view.center, view.zoom, size)
-    const cursorWorld = {
-      x: topLeft.x + cursor.x,
-      y: topLeft.y + cursor.y,
-    }
-    const cursorLatLng = unprojectPoint(cursorWorld, view.zoom)
-    const nextCursorWorld = projectLatLng(cursorLatLng, nextZoom)
-    const nextCenterWorld = {
-      x: nextCursorWorld.x - (cursor.x - size.width / 2),
-      y: nextCursorWorld.y - (cursor.y - size.height / 2),
-    }
-
-    setView({
-      center: unprojectPoint(nextCenterWorld, nextZoom),
-      zoom: nextZoom,
-    })
-  }
-
-  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || size.width <= 0 || size.height <= 0) {
-      return
-    }
-
-    if (event.target instanceof Element && event.target.closest('button,a,input,select,textarea')) {
-      return
-    }
-
-    event.currentTarget.setPointerCapture(event.pointerId)
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startZoom: view.zoom,
-      startCenterWorld: projectLatLng(view.center, view.zoom),
-      deltaX: 0,
-      deltaY: 0,
-    }
-    setIsDragging(true)
-  }
-
-  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current
-
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return
-    }
-
-    drag.deltaX = event.clientX - drag.startX
-    drag.deltaY = event.clientY - drag.startY
-
-    if (drag.animationFrame) {
-      return
-    }
-
-    drag.animationFrame = window.requestAnimationFrame(() => {
-      const currentDrag = dragRef.current
-
-      if (currentDrag && mapPaneRef.current) {
-        mapPaneRef.current.style.transform = `translate3d(${currentDrag.deltaX}px, ${currentDrag.deltaY}px, 0)`
-        currentDrag.animationFrame = undefined
-      }
-    })
-  }
-
-  const stopDragging = (event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current
-
-    if (drag?.pointerId === event.pointerId) {
-      if (drag.animationFrame) {
-        window.cancelAnimationFrame(drag.animationFrame)
-      }
-
-      setView((current) => ({
-        ...current,
-        zoom: drag.startZoom,
-        center: unprojectPoint(
-          {
-            x: drag.startCenterWorld.x - drag.deltaX,
-            y: drag.startCenterWorld.y - drag.deltaY,
-          },
-          drag.startZoom,
-        ),
-      }))
-
-      window.requestAnimationFrame(() => {
-        if (mapPaneRef.current) {
-          mapPaneRef.current.style.transform = ''
-        }
-      })
-
-      dragRef.current = null
-      setIsDragging(false)
-    }
-  }
+  }, [showStops])
 
   return (
     <section className="order-1 min-h-0 flex-1 bg-zinc-900 lg:order-2 lg:h-auto lg:min-h-0">
-      <div
-        ref={containerRef}
-        onWheel={handleWheel}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={stopDragging}
-        onPointerCancel={stopDragging}
-        className={`relative h-full w-full touch-none overflow-hidden bg-sky-100 ${
-          isDragging ? 'cursor-grabbing' : 'cursor-grab'
-        }`}
-      >
-        <div ref={mapPaneRef} className="absolute inset-0 will-change-transform">
-          <div className="absolute inset-0">
-            {tiles.map((tile) => (
-              <img
-                key={tile.key}
-                alt=""
-                draggable={false}
-                decoding="async"
-                src={`https://tile.openstreetmap.org/${view.zoom}/${tile.x}/${tile.y}.png`}
-                className="absolute h-64 w-64 select-none"
-                style={{
-                  left: tile.left,
-                  top: tile.top,
-                  width: TILE_SIZE,
-                  height: TILE_SIZE,
-                }}
-              />
-            ))}
-          </div>
+      <div className="relative h-full w-full overflow-hidden bg-sky-100">
+        <MapContainer
+          center={[DEFAULT_CENTER.lat, DEFAULT_CENTER.lng]}
+          zoom={13}
+          minZoom={11}
+          maxZoom={18}
+          zoomControl={false}
+          renderer={renderer}
+          preferCanvas
+          zoomAnimation
+          fadeAnimation
+          markerZoomAnimation
+          wheelDebounceTime={60}
+          wheelPxPerZoomLevel={90}
+          zoomDelta={0.5}
+          zoomSnap={0.5}
+          touchZoom="center"
+          className="h-full w-full"
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+            keepBuffer={3}
+            updateWhenIdle
+            updateWhenZooming={false}
+          />
 
-          <svg className="pointer-events-none absolute inset-0 z-10 h-full w-full">
-            <RouteLayer
-              shapes={visibleShapes}
-              routesById={network?.routesById}
-              project={project}
-              selectedRouteId={selectedRouteId}
+          <MapResizeController />
+          <MapViewportController
+            network={network}
+            vehicles={vehicles}
+            selectedVehicle={selectedVehicle}
+            selectedVehicleId={selectedVehicleId}
+            selectedRouteId={selectedRouteId}
+          />
+
+          <RouteLayer
+            shapes={displayedShapes}
+            routesById={network?.routesById}
+            renderer={renderer}
+            selectedRouteId={selectedRouteId}
+          />
+
+          {network && showStops ? (
+            <StopsLayer
+              network={network}
+              selectedStopId={selectedStopId}
+              onSelect={handleSelectStop}
             />
-          </svg>
+          ) : null}
 
-          {visibleStops.map(({ stop, point }) => (
-            <StopMarker key={stop.id} stop={stop} point={point} detailed={view.zoom >= 16} />
-          ))}
-
-          {visibleVehiclePoints.map(({ vehicle, point }) => (
+          {displayedVehicles.map((vehicle) => (
             <BusMarker
               key={vehicle.id}
               vehicle={vehicle}
-              point={point}
               selected={vehicle.id === selectedVehicleId}
-              onSelect={onSelectVehicle}
+              onSelect={handleSelectVehicle}
             />
           ))}
 
+          <LeafletMapControls points={vehicles.length ? vehicles : network?.stationStops ?? []} />
+        </MapContainer>
+
+        <div className="pointer-events-none absolute left-2 top-2 z-[1000] flex w-max max-w-[calc(100%-4rem)] items-center gap-2 rounded-md border border-white/70 bg-white/95 px-2 py-1.5 text-[10px] text-zinc-700 shadow-lg sm:left-4 sm:top-4 sm:px-3 sm:text-xs">
+          <LegendMarker variant="bus" label="Bus" />
+          <LegendMarker variant="tram" label="Tram" />
+          <LegendMarker variant="mixed" label="Mixte" />
         </div>
-
-        <MapControls
-          onZoomIn={() => zoomAtCenter(view.zoom + 1)}
-          onZoomOut={() => zoomAtCenter(view.zoom - 1)}
-          onRecenter={recenter}
-        />
-
-        <div className="absolute left-2 top-2 z-40 hidden max-w-[calc(100%-4rem)] rounded-md border border-white/70 bg-white/95 px-2 py-1.5 text-[11px] text-zinc-700 shadow-lg sm:block sm:left-4 sm:top-4 sm:px-3 sm:py-2 sm:text-xs">
-          <span className="font-medium">Zoom {view.zoom}</span>
-          <span className="mx-2 text-zinc-400">·</span>
-          <span>{visibleStops.length} arrêts</span>
-          <span className="mx-2 text-zinc-400">·</span>
-          <span>{visibleShapes.length} traces</span>
-        </div>
-
-        <a
-          href="https://www.openstreetmap.org/copyright"
-          target="_blank"
-          rel="noreferrer"
-          className="absolute bottom-2 right-2 z-40 rounded-md bg-white/95 px-2 py-1 text-[10px] text-zinc-600 shadow sm:bottom-4 sm:right-4 sm:text-xs"
-        >
-          © OpenStreetMap
-        </a>
 
         {selectedVehicle ? <VehicleInfoPanel vehicle={selectedVehicle} onClose={onClearVehicle} /> : null}
+        {selectedStop && network && !selectedVehicle ? (
+          <StopInfoPanel
+            stop={selectedStop}
+            network={network}
+            vehicles={allVehicles}
+            onClose={() => setSelectedStopId(null)}
+            onSelectVehicle={handleSelectVehicle}
+          />
+        ) : null}
 
         {loading ? (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950/35 backdrop-blur-sm">
+          <div className="absolute inset-0 z-[1200] flex items-center justify-center bg-zinc-950/35 backdrop-blur-sm">
             <div className="flex items-center gap-3 rounded-md border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 shadow-2xl">
               <LoaderCircle className="h-5 w-5 animate-spin text-sky-300" aria-hidden="true" />
               Chargement des données SETRAM
@@ -399,5 +206,268 @@ export function TransitMap({
         ) : null}
       </div>
     </section>
+  )
+}
+
+function StopsLayer({
+  network,
+  selectedStopId,
+  onSelect,
+}: {
+  network: StaticNetwork
+  selectedStopId: string | null
+  onSelect: (stopId: string) => void
+}) {
+  const map = useMap()
+  const [viewport, setViewport] = useState<Viewport>(() => ({
+    bounds: map.getBounds(),
+    zoom: map.getZoom(),
+  }))
+  const updateViewport = useCallback(() => {
+    setViewport({
+      bounds: map.getBounds(),
+      zoom: map.getZoom(),
+    })
+  }, [map])
+
+  useMapEvents({
+    moveend: updateViewport,
+    zoomend: updateViewport,
+  })
+
+  const items = useMemo(() => {
+    const detailed = viewport.zoom >= STOP_DETAIL_ZOOM
+    const source = detailed
+      ? network.stops.filter((stop) => stop.locationType !== '1')
+      : network.stationStops
+    const paddedBounds = viewport.bounds.pad(0.18)
+    const visibleStops = source
+      .filter((stop) => paddedBounds.contains([stop.lat, stop.lng]))
+      .slice(0, MAX_VISIBLE_STOPS)
+
+    return buildStopItems(visibleStops, map, viewport.zoom)
+  }, [map, network, viewport])
+
+  return items.map((item) =>
+    item.type === 'cluster' ? (
+      <StopClusterMarker
+        key={item.id}
+        item={item}
+        onSelect={() => {
+          map.flyTo([item.lat, item.lng], Math.min(STOP_CLUSTER_ZOOM + 1, viewport.zoom + 2), {
+            animate: true,
+            duration: 0.4,
+          })
+        }}
+      />
+    ) : (
+      <StopMarker
+        key={item.stop.id}
+        stop={item.stop}
+        detailed={viewport.zoom >= STOP_DETAIL_ZOOM}
+        selected={item.stop.id === selectedStopId}
+        onSelect={onSelect}
+      />
+    ),
+  )
+}
+
+function StopClusterMarker({
+  item,
+  onSelect,
+}: {
+  item: Extract<StopMapItem, { type: 'cluster' }>
+  onSelect: () => void
+}) {
+  const icon = useMemo(
+    () =>
+      divIcon({
+        className: 'setram-cluster-icon',
+        html: `<span>${item.stops.length}</span>`,
+        iconSize: [38, 38],
+        iconAnchor: [19, 19],
+      }),
+    [item.stops.length],
+  )
+  const eventHandlers = useMemo(() => ({ click: onSelect }), [onSelect])
+
+  return (
+    <Marker
+      position={[item.lat, item.lng]}
+      icon={icon}
+      eventHandlers={eventHandlers}
+      title={`${item.stops.length} arrêts, zoomer pour détailler`}
+      keyboard
+    />
+  )
+}
+
+function MapViewportController({
+  network,
+  vehicles,
+  selectedVehicle,
+  selectedVehicleId,
+  selectedRouteId,
+}: {
+  network?: StaticNetwork
+  vehicles: Vehicle[]
+  selectedVehicle?: Vehicle
+  selectedVehicleId: string | null
+  selectedRouteId: string | null
+}) {
+  const map = useMap()
+  const initialFitDone = useRef(false)
+  const previousVehicleId = useRef<string | null>(null)
+  const previousRouteId = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (initialFitDone.current || !vehicles.length) {
+      return
+    }
+
+    fitMapToPoints(map, vehicles, 14, false)
+    initialFitDone.current = true
+  }, [map, vehicles])
+
+  useEffect(() => {
+    if (selectedVehicleId === previousVehicleId.current) {
+      return
+    }
+
+    previousVehicleId.current = selectedVehicleId
+
+    if (selectedVehicle) {
+      map.flyTo(
+        [selectedVehicle.lat, selectedVehicle.lng],
+        Math.max(15, map.getZoom()),
+        { animate: true, duration: 0.45 },
+      )
+    }
+  }, [map, selectedVehicle, selectedVehicleId])
+
+  useEffect(() => {
+    if (selectedRouteId === previousRouteId.current) {
+      return
+    }
+
+    previousRouteId.current = selectedRouteId
+
+    if (!selectedRouteId || selectedVehicleId) {
+      return
+    }
+
+    const routePoints = network?.shapes
+      .filter((shape) => shape.routeId === selectedRouteId)
+      .flatMap((shape) => shape.points)
+    fitMapToPoints(map, vehicles.length ? vehicles : routePoints ?? [], 15)
+  }, [map, network, selectedRouteId, selectedVehicleId, vehicles])
+
+  return null
+}
+
+function MapResizeController() {
+  const map = useMap()
+
+  useEffect(() => {
+    const container = map.getContainer()
+    let animationFrame = 0
+    const observer = new ResizeObserver(() => {
+      window.cancelAnimationFrame(animationFrame)
+      animationFrame = window.requestAnimationFrame(() => map.invalidateSize({ pan: false }))
+    })
+
+    observer.observe(container)
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame)
+      observer.disconnect()
+    }
+  }, [map])
+
+  return null
+}
+
+function LeafletMapControls({ points }: { points: LatLng[] }) {
+  const map = useMap()
+
+  return (
+    <MapControls
+      onZoomIn={() => map.zoomIn(0.5)}
+      onZoomOut={() => map.zoomOut(0.5)}
+      onRecenter={() => fitMapToPoints(map, points, 14)}
+    />
+  )
+}
+
+function buildStopItems(stops: Stop[], map: LeafletMap, zoom: number): StopMapItem[] {
+  if (zoom >= STOP_CLUSTER_ZOOM) {
+    return stops.map((stop) => ({ type: 'stop', stop }))
+  }
+
+  const groups = new Map<string, Stop[]>()
+  const cellSize = zoom < 12.5 ? 72 : 58
+
+  for (const stop of stops) {
+    const point = map.project([stop.lat, stop.lng], zoom)
+    const key = `${Math.floor(point.x / cellSize)}:${Math.floor(point.y / cellSize)}`
+    const group = groups.get(key)
+
+    if (group) {
+      group.push(stop)
+    } else {
+      groups.set(key, [stop])
+    }
+  }
+
+  return Array.from(groups.entries()).map(([id, groupedStops]) => {
+    if (groupedStops.length === 1) {
+      return { type: 'stop', stop: groupedStops[0] } satisfies StopMapItem
+    }
+
+    const center = groupedStops.reduce(
+      (acc, stop) => ({ lat: acc.lat + stop.lat, lng: acc.lng + stop.lng }),
+      { lat: 0, lng: 0 },
+    )
+
+    return {
+      type: 'cluster',
+      id: `cluster-${zoom}-${id}`,
+      lat: center.lat / groupedStops.length,
+      lng: center.lng / groupedStops.length,
+      stops: groupedStops,
+    }
+  })
+}
+
+function fitMapToPoints(map: LeafletMap, points: LatLng[], maxZoom: number, animate = true) {
+  if (!points.length) {
+    return
+  }
+
+  const bounds = latLngBounds(points.map((point) => [point.lat, point.lng]))
+  map.fitBounds(bounds, {
+    animate,
+    duration: animate ? 0.4 : 0,
+    maxZoom,
+    padding: [44, 44],
+  })
+}
+
+function LegendMarker({ variant, label }: { variant: 'bus' | 'tram' | 'mixed'; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        className={`block h-2.5 w-2.5 border border-white shadow-sm ${
+          variant === 'tram' ? 'rotate-45 rounded-[2px] bg-sky-500' : 'rounded-full bg-red-600'
+        } ${variant === 'mixed' ? 'rounded-[3px]' : ''}`}
+        style={
+          variant === 'mixed'
+            ? { background: 'linear-gradient(135deg, #0284c7 0 50%, #dc2626 50% 100%)' }
+            : undefined
+        }
+        aria-hidden="true"
+      />
+      <span>{label}</span>
+    </span>
   )
 }

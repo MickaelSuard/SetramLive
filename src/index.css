@@ -1,1 +1,131 @@
+@import "leaflet/dist/leaflet.css";
 @import "tailwindcss";
+
+.leaflet-container {
+  background: #e0f2fe;
+  font-family: inherit;
+}
+
+.leaflet-control-attribution {
+  border-radius: 4px 0 0;
+  font-size: 10px;
+}
+
+.setram-stop-icon,
+.setram-vehicle-icon,
+.setram-cluster-icon {
+  background: transparent;
+  border: 0;
+}
+
+.setram-stop-icon {
+  display: grid;
+  place-items: center;
+}
+
+.setram-stop-dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #dc2626;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 45%);
+  transition: transform 120ms ease;
+}
+
+.setram-stop-dot--detailed {
+  width: 16px;
+  height: 16px;
+}
+
+.setram-stop-dot--tram {
+  border-radius: 3px;
+  background: #0284c7;
+  transform: rotate(45deg);
+}
+
+.setram-stop-dot--mixed {
+  border-radius: 4px;
+  background: linear-gradient(135deg, #0284c7 0 50%, #dc2626 50% 100%);
+}
+
+.setram-stop-dot--unknown {
+  background: #71717a;
+}
+
+.setram-stop-dot--selected {
+  box-shadow:
+    0 0 0 4px rgb(24 24 27 / 75%),
+    0 2px 6px rgb(0 0 0 / 45%);
+  transform: scale(1.18);
+}
+
+.setram-stop-dot--tram.setram-stop-dot--selected {
+  transform: rotate(45deg) scale(1.18);
+}
+
+.setram-cluster-icon {
+  display: grid;
+  place-items: center;
+}
+
+.setram-cluster-icon span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 3px solid rgb(255 255 255 / 90%);
+  border-radius: 999px;
+  background: #18181b;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 35%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.setram-vehicle-marker {
+  display: flex;
+  width: 52px;
+  height: 58px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  transition: transform 120ms ease;
+}
+
+.setram-vehicle-marker:hover,
+.setram-vehicle-marker--selected {
+  transform: scale(1.12);
+}
+
+.setram-vehicle-emoji {
+  font-size: 20px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 35%));
+}
+
+.setram-vehicle-route {
+  display: block;
+  max-width: 48px;
+  height: 20px;
+  margin-top: 4px;
+  overflow: hidden;
+  padding: 4px 6px;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leaflet-zoom-animated,
+  .leaflet-fade-anim .leaflet-popup,
+  .setram-stop-dot,
+  .setram-vehicle-marker {
+    transition: none;
+  }
+}

@@ -14,7 +14,7 @@ export function VehicleInfoPanel({ vehicle, onClose }: VehicleInfoPanelProps) {
     <div
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
-      className="absolute bottom-2 left-2 right-2 z-50 rounded-md border border-zinc-800 bg-zinc-950 p-2.5 text-zinc-100 shadow-2xl sm:bottom-4 sm:left-4 sm:right-auto sm:w-80 sm:p-3"
+      className="absolute bottom-2 left-2 right-2 z-[1100] rounded-md border border-zinc-800 bg-zinc-950 p-2.5 text-zinc-100 shadow-2xl sm:bottom-4 sm:left-4 sm:right-auto sm:w-80 sm:p-3"
     >
       <div className="flex items-start gap-3">
         <span className="text-xl leading-none sm:text-2xl" aria-hidden="true">

@@ -72,15 +72,9 @@ export function FleetPanel({
   }, [query, vehicles])
 
   return (
-    <aside className="order-2 flex h-[44dvh] min-h-[15rem] max-h-[21rem] shrink-0 flex-col overflow-hidden rounded-t-xl border-t border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl sm:h-[38dvh] lg:order-1 lg:h-auto lg:min-h-0 lg:max-h-none lg:rounded-none lg:border-r lg:border-t-0 lg:shadow-none">
-      <div className="shrink-0 border-b border-zinc-800 p-2.5 lg:hidden">
-        <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-zinc-700" />
+    <aside className="order-2 flex h-[28dvh] min-h-[11rem] max-h-[15rem] shrink-0 flex-col overflow-hidden border-t border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl sm:h-[32dvh] sm:max-h-[18rem] lg:order-1 lg:h-auto lg:min-h-0 lg:max-h-none lg:border-r lg:border-t-0 lg:shadow-none">
+      <div className="shrink-0 border-b border-zinc-800 p-2 lg:hidden">
         <div className="flex items-center gap-2">
-          <div className="flex h-9 min-w-[4.5rem] shrink-0 flex-col justify-center rounded-md border border-zinc-800 bg-zinc-900 px-2">
-            <span className="text-[10px] font-medium uppercase text-zinc-500">Live</span>
-            <span className="text-sm font-semibold leading-none text-zinc-100">{filteredVehicles.length}</span>
-          </div>
-
           <label className="min-w-0 flex-1">
             <span className="sr-only">Ligne</span>
             <select
@@ -99,7 +93,10 @@ export function FleetPanel({
 
           <MobileLayerButton icon={MapPinned} label="Arrêts" enabled={showStops} onToggle={onToggleStops} />
           <MobileLayerButton icon={RouteIcon} label="Tracés" enabled={showRoutes} onToggle={onToggleRoutes} />
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-zinc-800 bg-zinc-900">
+          <span
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-zinc-800 bg-zinc-900"
+            title={`${filteredVehicles.length} véhicules visibles`}
+          >
             <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin text-sky-300' : 'text-zinc-500'}`} aria-hidden="true" />
           </span>
         </div>

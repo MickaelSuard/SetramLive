@@ -17,6 +17,8 @@ export type Stop = LatLng & {
   locationType: '0' | '1' | string
   parentStation?: string
   parentStationName?: string
+  routeIds: string[]
+  transportTypes: Array<Route['type']>
 }
 
 export type Route = {
@@ -36,6 +38,35 @@ export type Shape = {
   bounds: Bounds
 }
 
+export type TripInfo = {
+  id: string
+  routeId?: string
+  serviceId?: string
+  shapeId?: string
+  headsign?: string
+  directionId?: number
+}
+
+export type ServiceCalendar = {
+  id: string
+  weekdays: boolean[]
+  startDate: string
+  endDate: string
+  exceptions: Record<string, 1 | 2>
+}
+
+export type StopDeparture = {
+  tripId: string
+  routeId: string
+  serviceId?: string
+  stopId: string
+  stopName?: string
+  arrivalSeconds: number
+  departureSeconds: number
+  headsign?: string
+  directionId?: number
+}
+
 export type StaticNetwork = {
   stops: Stop[]
   stationStops: Stop[]
@@ -46,6 +77,9 @@ export type StaticNetwork = {
   shapeIdsByRouteId: Record<string, string[]>
   tripRouteIds: Record<string, string>
   tripShapeIds: Record<string, string>
+  tripsById: Record<string, TripInfo>
+  servicesById: Record<string, ServiceCalendar>
+  stopDeparturesByStopId: Record<string, StopDeparture[]>
   loadedAt: number
 }
 
