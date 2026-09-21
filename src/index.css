@@ -12,8 +12,7 @@
 }
 
 .setram-stop-icon,
-.setram-vehicle-icon,
-.setram-cluster-icon {
+.setram-vehicle-icon {
   background: transparent;
   border: 0;
 }
@@ -63,25 +62,6 @@
 
 .setram-stop-dot--tram.setram-stop-dot--selected {
   transform: rotate(45deg) scale(1.18);
-}
-
-.setram-cluster-icon {
-  display: grid;
-  place-items: center;
-}
-
-.setram-cluster-icon span {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border: 3px solid rgb(255 255 255 / 90%);
-  border-radius: 999px;
-  background: #18181b;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 35%);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .setram-vehicle-marker {

@@ -1,10 +1,10 @@
-import { canvas, divIcon, latLngBounds } from 'leaflet'
+import { canvas, latLngBounds } from 'leaflet'
 import type { LatLngBounds, Map as LeafletMap } from 'leaflet'
 import { LoaderCircle } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { DEFAULT_CENTER } from '../constants/endpoints'
-import type { LatLng, StaticNetwork, Stop, Vehicle } from '../types/transit'
+import type { LatLng, StaticNetwork, Vehicle } from '../types/transit'
 import { BusMarker } from './BusMarker'
 import { MapControls } from './MapControls'
 import { RouteLayer } from './RouteLayer'
@@ -30,21 +30,10 @@ type Viewport = {
   zoom: number
 }
 
-type StopMapItem =
-  | {
-      type: 'stop'
-      stop: Stop
-    }
-  | {
-      type: 'cluster'
-      id: string
-      lat: number
-      lng: number
-      stops: Stop[]
-    }
-
 const STOP_DETAIL_ZOOM = 16
-const STOP_CLUSTER_ZOOM = 14
+const STOP_OVERVIEW_ZOOM = 15
+const OVERVIEW_RADIUS_RATIO = 0.42
+const MAX_OVERVIEW_STOPS = 28
 const MAX_VISIBLE_STOPS = 450
 
 export function TransitMap({
@@ -235,71 +224,45 @@ function StopsLayer({
     zoomend: updateViewport,
   })
 
-  const items = useMemo(() => {
+  const visibleStops = useMemo(() => {
     const detailed = viewport.zoom >= STOP_DETAIL_ZOOM
     const source = detailed
       ? network.stops.filter((stop) => stop.locationType !== '1')
-      : network.stationStops
+      : network.stationStops.filter((stop) =>
+          stop.transportTypes.some((type) => type === 'Bus' || type === 'Tram'),
+        )
+
+    if (viewport.zoom < STOP_OVERVIEW_ZOOM) {
+      const size = map.getSize()
+      const center = size.divideBy(2)
+      const radius = Math.min(size.x, size.y) * OVERVIEW_RADIUS_RATIO
+
+      return source
+        .map((stop) => ({
+          stop,
+          distance: map.latLngToContainerPoint([stop.lat, stop.lng]).distanceTo(center),
+        }))
+        .filter(({ distance }) => distance <= radius)
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, MAX_OVERVIEW_STOPS)
+        .map(({ stop }) => stop)
+    }
+
     const paddedBounds = viewport.bounds.pad(0.18)
-    const visibleStops = source
+    return source
       .filter((stop) => paddedBounds.contains([stop.lat, stop.lng]))
       .slice(0, MAX_VISIBLE_STOPS)
-
-    return buildStopItems(visibleStops, map, viewport.zoom)
   }, [map, network, viewport])
 
-  return items.map((item) =>
-    item.type === 'cluster' ? (
-      <StopClusterMarker
-        key={item.id}
-        item={item}
-        onSelect={() => {
-          map.flyTo([item.lat, item.lng], Math.min(STOP_CLUSTER_ZOOM + 1, viewport.zoom + 2), {
-            animate: true,
-            duration: 0.4,
-          })
-        }}
-      />
-    ) : (
-      <StopMarker
-        key={item.stop.id}
-        stop={item.stop}
-        detailed={viewport.zoom >= STOP_DETAIL_ZOOM}
-        selected={item.stop.id === selectedStopId}
-        onSelect={onSelect}
-      />
-    ),
-  )
-}
-
-function StopClusterMarker({
-  item,
-  onSelect,
-}: {
-  item: Extract<StopMapItem, { type: 'cluster' }>
-  onSelect: () => void
-}) {
-  const icon = useMemo(
-    () =>
-      divIcon({
-        className: 'setram-cluster-icon',
-        html: `<span>${item.stops.length}</span>`,
-        iconSize: [38, 38],
-        iconAnchor: [19, 19],
-      }),
-    [item.stops.length],
-  )
-  const eventHandlers = useMemo(() => ({ click: onSelect }), [onSelect])
-
-  return (
-    <Marker
-      position={[item.lat, item.lng]}
-      icon={icon}
-      eventHandlers={eventHandlers}
-      title={`${item.stops.length} arrêts, zoomer pour détailler`}
-      keyboard
+  return visibleStops.map((stop) => (
+    <StopMarker
+      key={stop.id}
+      stop={stop}
+      detailed={viewport.zoom >= STOP_DETAIL_ZOOM}
+      selected={stop.id === selectedStopId}
+      onSelect={onSelect}
     />
-  )
+  ))
 }
 
 function MapViewportController({
@@ -397,46 +360,6 @@ function LeafletMapControls({ points }: { points: LatLng[] }) {
       onRecenter={() => fitMapToPoints(map, points, 14)}
     />
   )
-}
-
-function buildStopItems(stops: Stop[], map: LeafletMap, zoom: number): StopMapItem[] {
-  if (zoom >= STOP_CLUSTER_ZOOM) {
-    return stops.map((stop) => ({ type: 'stop', stop }))
-  }
-
-  const groups = new Map<string, Stop[]>()
-  const cellSize = zoom < 12.5 ? 72 : 58
-
-  for (const stop of stops) {
-    const point = map.project([stop.lat, stop.lng], zoom)
-    const key = `${Math.floor(point.x / cellSize)}:${Math.floor(point.y / cellSize)}`
-    const group = groups.get(key)
-
-    if (group) {
-      group.push(stop)
-    } else {
-      groups.set(key, [stop])
-    }
-  }
-
-  return Array.from(groups.entries()).map(([id, groupedStops]) => {
-    if (groupedStops.length === 1) {
-      return { type: 'stop', stop: groupedStops[0] } satisfies StopMapItem
-    }
-
-    const center = groupedStops.reduce(
-      (acc, stop) => ({ lat: acc.lat + stop.lat, lng: acc.lng + stop.lng }),
-      { lat: 0, lng: 0 },
-    )
-
-    return {
-      type: 'cluster',
-      id: `cluster-${zoom}-${id}`,
-      lat: center.lat / groupedStops.length,
-      lng: center.lng / groupedStops.length,
-      stops: groupedStops,
-    }
-  })
 }
 
 function fitMapToPoints(map: LeafletMap, points: LatLng[], maxZoom: number, animate = true) {
